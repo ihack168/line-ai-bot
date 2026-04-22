@@ -1,9 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { 
-  messagingApi: { MessagingApiClient, MessagingContentClient }, 
-  middleware 
-} = require('@line/bot-sdk');
+const line = require('@line/bot-sdk');
 const axios = require('axios');
 const FormData = require('form-data');
 
@@ -14,7 +11,7 @@ const config = {
 
 const app = express();
 
-app.post('/callback', middleware(config), (req, res) => {
+app.post('/callback', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then((result) => res.json(result))
     .catch((err) => {
@@ -23,11 +20,7 @@ app.post('/callback', middleware(config), (req, res) => {
     });
 });
 
-const client = new MessagingApiClient({
-  channelAccessToken: config.channelAccessToken
-});
-
-const lineContentClient = new MessagingContentClient({
+const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: config.channelAccessToken
 });
 
@@ -42,13 +35,15 @@ async function handleEvent(event) {
     let files = [];
 
     if (event.message.type === 'image') {
-      const stream = await lineContentClient.getMessageContent(event.message.id);
-      
-      const chunks = [];
-      for await (const chunk of stream) {
-        chunks.push(chunk);
-      }
-      const buffer = Buffer.concat(chunks);
+      // 直接用 axios 下載圖片，不用 MessagingContentClient
+      const imageRes = await axios.get(
+        `https://api-data.line.me/v2/bot/message/${event.message.id}/content`,
+        {
+          headers: { 'Authorization': `Bearer ${config.channelAccessToken}` },
+          responseType: 'arraybuffer'
+        }
+      );
+      const buffer = Buffer.from(imageRes.data);
 
       const formData = new FormData();
       formData.append('file', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
