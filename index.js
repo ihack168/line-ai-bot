@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
 const axios = require('axios');
-const FormData = require('form-data'); // 必須處理圖片上傳格式
+const FormData = require('form-data');
 
 const config = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -21,17 +21,17 @@ app.post('/callback', line.middleware(config), (req, res) => {
     });
 });
 
+// --- 修正後的 Client 宣告方式 ---
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: config.channelAccessToken
 });
 
-// 這是專門用來下載 LINE 圖片的 Client (舊版 SDK 在下載檔案上較直觀)
-const lineContentClient = new line.messagingApi.MessagingApiContentClient({
+// 這裡修正了導致 Crash 的地方
+const lineContentClient = new line.messagingApi.MessagingContentClient({
   channelAccessToken: config.channelAccessToken
 });
 
 async function handleEvent(event) {
-  // 只處理文字和圖片訊息
   if (event.type !== 'message' || (event.message.type !== 'text' && event.message.type !== 'image')) {
     return Promise.resolve(null);
   }
@@ -41,19 +41,16 @@ async function handleEvent(event) {
   try {
     let files = [];
 
-    // --- 圖片處理邏輯 ---
     if (event.message.type === 'image') {
-      // 1. 從 LINE 下載圖片二進位檔
+      // 使用修正後的 lineContentClient 獲取內容
       const stream = await lineContentClient.getMessageContent(event.message.id);
       
-      // 將 Stream 轉為 Buffer 以便上傳
       const chunks = [];
       for await (const chunk of stream) {
         chunks.push(chunk);
       }
       const buffer = Buffer.concat(chunks);
 
-      // 2. 將圖片上傳到 Dify
       const formData = new FormData();
       formData.append('file', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
       formData.append('user', userId);
@@ -65,7 +62,6 @@ async function handleEvent(event) {
         }
       });
 
-      // 3. 取得 Dify 的檔案 ID
       files = [{
         type: "image",
         transfer_method: "local_file",
@@ -73,13 +69,12 @@ async function handleEvent(event) {
       }];
     }
 
-    // --- 呼叫 Dify Chat API ---
     const response = await axios.post(`${process.env.DIFY_API_URL}/chat-messages`, {
       inputs: {},
-      query: event.message.type === 'text' ? event.message.text : "這張圖片是什麼？", // 圖片訊息的預設提問
+      query: event.message.type === 'text' ? event.message.text : "這張圖片是什麼？",
       response_mode: "blocking",
       user: userId,
-      files: files // 如果有圖片，會帶入檔案 ID
+      files: files
     }, {
       headers: {
         'Authorization': `Bearer ${process.env.DIFY_API_KEY}`,
